@@ -40,7 +40,8 @@ def process_single_file_worker(svg_file, output_dir, temp_dir, keep_json):
         'success': False,
         'skipped': False,
         'error': None,
-        'dxf_size': 0
+        'dxf_size': 0,
+        'stage': None
     }
 
     try:
@@ -52,6 +53,7 @@ def process_single_file_worker(svg_file, output_dir, temp_dir, keep_json):
             return result
 
         # Step 1: Extract vectors
+        result['stage'] = 'extraction'
         json_output = temp_dir / f"{svg_file.stem}_vectors.json"
 
         cmd = [
@@ -69,12 +71,29 @@ def process_single_file_worker(svg_file, output_dir, temp_dir, keep_json):
         )
 
         if extraction_result.returncode != 0:
-            raise Exception(f"Extraction failed: {extraction_result.stderr[:200]}")
+            # Capture more error details
+            stderr = extraction_result.stderr.strip()
+            stdout = extraction_result.stdout.strip()
+            error_msg = f"Exit code {extraction_result.returncode}"
+            if stderr:
+                error_msg += f" | {stderr[-500:]}"  # Last 500 chars of stderr
+            elif stdout:
+                error_msg += f" | {stdout[-500:]}"  # Last 500 chars of stdout
+            raise Exception(f"Extraction failed: {error_msg}")
 
         if not json_output.exists():
-            raise Exception(f"JSON output not created")
+            # More detailed error about what happened
+            stderr = extraction_result.stderr.strip()
+            stdout = extraction_result.stdout.strip()
+            error_msg = "JSON not created"
+            if stderr:
+                error_msg += f" | stderr: {stderr[-300:]}"
+            if stdout:
+                error_msg += f" | stdout: {stdout[-300:]}"
+            raise Exception(error_msg)
 
         # Step 2: Convert to DXF
+        result['stage'] = 'conversion'
         cmd = [
             sys.executable,
             'svg_to_dxf.py',
@@ -90,10 +109,26 @@ def process_single_file_worker(svg_file, output_dir, temp_dir, keep_json):
         )
 
         if conversion_result.returncode != 0:
-            raise Exception(f"Conversion failed: {conversion_result.stderr[:200]}")
+            # Capture more error details
+            stderr = conversion_result.stderr.strip()
+            stdout = conversion_result.stdout.strip()
+            error_msg = f"Exit code {conversion_result.returncode}"
+            if stderr:
+                error_msg += f" | {stderr[-500:]}"
+            elif stdout:
+                error_msg += f" | {stdout[-500:]}"
+            raise Exception(f"Conversion failed: {error_msg}")
 
         if not dxf_output.exists():
-            raise Exception(f"DXF output not created")
+            # More detailed error about what happened
+            stderr = conversion_result.stderr.strip()
+            stdout = conversion_result.stdout.strip()
+            error_msg = "DXF not created"
+            if stderr:
+                error_msg += f" | stderr: {stderr[-300:]}"
+            if stdout:
+                error_msg += f" | stdout: {stdout[-300:]}"
+            raise Exception(error_msg)
 
         # Copy JSON if keeping
         if keep_json:
@@ -222,9 +257,26 @@ class SVGToDXFPipeline:
         if self.errors:
             print(f"\nERRORS ({len(self.errors)}):")
             for error in self.errors[:10]:  # Show first 10 errors
-                print(f"  • {error['file']}: {error['error'][:80]}")
+                stage_info = f"[{error.get('stage', 'unknown')}]"
+                error_msg = error['error'][:100] if len(error['error']) > 100 else error['error']
+                print(f"  • {error['file']} {stage_info}: {error_msg}")
             if len(self.errors) > 10:
                 print(f"  ... and {len(self.errors) - 10} more errors")
+
+            # Optionally save error log to file
+            error_log = self.output_dir / 'errors.log'
+            try:
+                with open(error_log, 'w') as f:
+                    f.write(f"SVG to DXF Batch Conversion Errors\n")
+                    f.write(f"{'='*60}\n\n")
+                    for error in self.errors:
+                        f.write(f"File: {error['file']}\n")
+                        f.write(f"Stage: {error.get('stage', 'unknown')}\n")
+                        f.write(f"Error: {error['error']}\n")
+                        f.write(f"{'-'*60}\n\n")
+                print(f"\nError log saved: {error_log}")
+            except Exception as e:
+                print(f"Warning: Could not save error log: {e}")
 
         print(f"\nOutput directory: {self.output_dir.absolute()}")
 
@@ -277,6 +329,7 @@ class SVGToDXFPipeline:
                         self.stats['failed'] += 1
                         self.errors.append({
                             'file': result['file'],
+                            'stage': result.get('stage', 'unknown'),
                             'error': result['error']
                         })
 
@@ -284,9 +337,12 @@ class SVGToDXFPipeline:
                     if self.verbose:
                         status = "SKIP" if result['skipped'] else ("OK" if result['success'] else "FAIL")
                         size_str = f"{result['dxf_size']:.2f}KB" if result['dxf_size'] > 0 else ""
-                        self.log(f"[{i}/{len(svg_files)}] {result['file']}: {status} {size_str}")
+                        stage_str = f" [{result.get('stage', 'unknown')}]" if not result['success'] and not result['skipped'] else ""
+                        self.log(f"[{i}/{len(svg_files)}] {result['file']}: {status}{stage_str} {size_str}")
                         if result['error'] and not result['skipped']:
-                            self.log(f"    Error: {result['error'][:100]}", 'ERROR')
+                            # Show more error details
+                            error_display = result['error'][:200] if len(result['error']) > 200 else result['error']
+                            self.log(f"    {error_display}", 'ERROR')
 
         except KeyboardInterrupt:
             self.log("\nPipeline interrupted by user", 'WARNING')
