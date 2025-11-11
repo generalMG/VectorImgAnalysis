@@ -177,15 +177,53 @@ def create_dxf_from_vectors(vector_data, output_path, layer_by_type=True):
                 current_point = end
 
             elif operation == 'a':
-                # Arc segment
-                # For now, approximate with polyline
+                # Arc segment - convert from SVG endpoint to DXF center parameterization
                 start = data.get('start', (0, 0))
                 end = data.get('end', (0, 0))
+                radius = data.get('radius', (0, 0))
+                rotation = data.get('rotation', 0)
+                large_arc = data.get('arc', False)
+                sweep = data.get('sweep', False)
 
-                # Simple arc approximation
-                points = [start, end]  # Simplified - could be improved
-                add_polyline(msp, points, layer, svg_height)
-                stats['arcs'] += 1
+                # Extract rx, ry from radius tuple
+                rx, ry = radius if isinstance(radius, (list, tuple)) else (radius, radius)
+
+                # When flipping Y-axis, we need to:
+                # 1. Flip the start and end points
+                # 2. Invert the sweep flag (direction reverses with Y-flip)
+                start_dxf = flip_y(start, svg_height)
+                end_dxf = flip_y(end, svg_height)
+                sweep_dxf = not sweep  # Invert sweep for Y-axis flip
+
+                # Convert to center parameterization in DXF coordinate space
+                arc_params = svg_arc_to_center_param(start_dxf, end_dxf, rx, ry, rotation, large_arc, sweep_dxf)
+
+                if arc_params is not None:
+                    center, r, start_angle, end_angle = arc_params
+
+                    # For circular arcs (rx == ry), use add_arc
+                    if abs(rx - ry) < 0.001:
+                        # Pass height=None since points are already in DXF space
+                        add_arc(msp, center, r, start_angle, end_angle, layer, height=None)
+                        stats['arcs'] += 1
+                    else:
+                        # For elliptical arcs, approximate with polyline
+                        num_points = 20
+                        points = []
+                        for i in range(num_points + 1):
+                            t = i / num_points
+                            angle = start_angle + t * (end_angle - start_angle)
+                            angle_rad = np.radians(angle)
+                            x = center[0] + rx * np.cos(angle_rad)
+                            y = center[1] + ry * np.sin(angle_rad)
+                            points.append((x, y))
+                        # Pass height=None since points are already in DXF space
+                        add_polyline(msp, points, layer, height=None)
+                        stats['polylines'] += 1
+                else:
+                    # Degenerate arc, draw as line
+                    add_line(msp, start, end, layer, svg_height)
+                    stats['lines'] += 1
 
                 current_point = end
 
@@ -365,6 +403,132 @@ def approximate_quadratic_bezier(p0, p1, p2, num_points=15):
         points.append((x, y))
 
     return points
+
+def svg_arc_to_center_param(start, end, rx, ry, rotation, large_arc, sweep):
+    """
+    Convert SVG arc from endpoint to center parameterization.
+
+    Based on SVG specification:
+    https://www.w3.org/TR/SVG/implnotes.html#ArcImplementationNotes
+
+    Args:
+        start: (x1, y1) start point
+        end: (x2, y2) end point
+        rx, ry: arc radii
+        rotation: x-axis rotation in degrees
+        large_arc: large arc flag (boolean)
+        sweep: sweep direction flag (boolean)
+
+    Returns:
+        (center, radius, start_angle, end_angle) in degrees
+        Returns None if arc is degenerate
+    """
+    x1, y1 = start
+    x2, y2 = end
+
+    # Handle degenerate cases
+    if (x1 == x2 and y1 == y2) or rx == 0 or ry == 0:
+        return None
+
+    # Ensure radii are positive
+    rx = abs(rx)
+    ry = abs(ry)
+
+    # Convert rotation to radians
+    phi = np.radians(rotation)
+    cos_phi = np.cos(phi)
+    sin_phi = np.sin(phi)
+
+    # Step 1: Compute (x1', y1') - transformed start point
+    dx = (x1 - x2) / 2.0
+    dy = (y1 - y2) / 2.0
+    x1_prime = cos_phi * dx + sin_phi * dy
+    y1_prime = -sin_phi * dx + cos_phi * dy
+
+    # Step 2: Correct radii if needed
+    lambda_ = (x1_prime / rx) ** 2 + (y1_prime / ry) ** 2
+    if lambda_ > 1:
+        rx *= np.sqrt(lambda_)
+        ry *= np.sqrt(lambda_)
+
+    # Step 3: Compute center point (cx', cy') in prime coordinates
+    sq = max(0, (rx * ry) ** 2 - (rx * y1_prime) ** 2 - (ry * x1_prime) ** 2)
+    sq = np.sqrt(sq / ((rx * y1_prime) ** 2 + (ry * x1_prime) ** 2))
+
+    # Choose sign based on large_arc and sweep flags
+    if large_arc == sweep:
+        sq = -sq
+
+    cx_prime = sq * rx * y1_prime / ry
+    cy_prime = -sq * ry * x1_prime / rx
+
+    # Step 4: Compute center point (cx, cy) in original coordinates
+    cx = cos_phi * cx_prime - sin_phi * cy_prime + (x1 + x2) / 2
+    cy = sin_phi * cx_prime + cos_phi * cy_prime + (y1 + y2) / 2
+
+    # Step 5: Compute angles
+    def angle_between(ux, uy, vx, vy):
+        """Compute angle between two vectors"""
+        n = np.sqrt(ux*ux + uy*uy) * np.sqrt(vx*vx + vy*vy)
+        c = (ux*vx + uy*vy) / n
+        c = max(-1, min(1, c))  # Clamp to [-1, 1]
+        angle = np.degrees(np.arccos(c))
+        if ux*vy - uy*vx < 0:
+            angle = -angle
+        return angle
+
+    # Start angle
+    theta1 = angle_between(1, 0, (x1_prime - cx_prime) / rx, (y1_prime - cy_prime) / ry)
+
+    # Delta angle
+    dtheta = angle_between(
+        (x1_prime - cx_prime) / rx, (y1_prime - cy_prime) / ry,
+        (-x1_prime - cx_prime) / rx, (-y1_prime - cy_prime) / ry
+    )
+
+    # Adjust delta angle based on sweep flag
+    if sweep and dtheta < 0:
+        dtheta += 360
+    elif not sweep and dtheta > 0:
+        dtheta -= 360
+
+    theta2 = theta1 + dtheta
+
+    return (cx, cy), rx, theta1, theta2
+
+def add_arc(msp, center, radius, start_angle, end_angle, layer, height=None):
+    """
+    Add an arc to the modelspace.
+
+    Args:
+        msp: modelspace
+        center: (cx, cy) center point (in DXF coordinate space if height=None)
+        radius: arc radius
+        start_angle: start angle in degrees
+        end_angle: end angle in degrees
+        layer: layer name
+        height: SVG height for Y-axis flip (use None if already in DXF space)
+    """
+    # Flip Y coordinate for center if needed
+    if height is not None:
+        center = flip_y(center, height)
+        # When we flip Y, angles are mirrored across X-axis
+        start_angle = -start_angle
+        end_angle = -end_angle
+        # Swap start and end to maintain direction
+        start_angle, end_angle = end_angle, start_angle
+
+    # Normalize angles to [0, 360)
+    start_angle = start_angle % 360
+    end_angle = end_angle % 360
+
+    msp.add_arc(
+        Vec3(center[0], center[1], 0),
+        radius,
+        start_angle,
+        end_angle,
+        dxfattribs={'layer': layer}
+    )
 
 def print_stats(stats):
     """Print conversion statistics"""
