@@ -1,6 +1,6 @@
 # Vector Image Analysis Tools
 
-Python tools to extract vector data from images (SVG and PNG) with detailed coordinate information, similar to PDF vector extraction.
+Python tools to extract vector data from images (SVG and PNG) and convert to CAD formats (DXF), with detailed coordinate information similar to PDF vector extraction.
 
 ## Supported Formats
 
@@ -19,6 +19,14 @@ Python tools to extract vector data from images (SVG and PNG) with detailed coor
 - Extract curves and contours using edge detection
 - Approximate vector coordinates from pixels
 - Works best with clean, high-contrast images
+
+### DXF Export - `svg_to_dxf.py`
+**DXF is the standard CAD interchange format** - convert extracted SVG vectors to DXF:
+- AutoCAD R2010 compatible format
+- Preserves lines, polylines, splines, circles, ellipses
+- Automatic layer organization by entity type
+- Compatible with AutoCAD, LibreCAD, QCAD, FreeCAD, SolidWorks
+- Direct import into CAD applications for editing
 
 ## Installation
 
@@ -87,19 +95,58 @@ uv run png_vector_extractor.py image.png
 python png_vector_extractor.py --help
 ```
 
-### Command-Line Arguments (both tools)
+### SVG to DXF Conversion
 
+After extracting vectors from SVG, convert to DXF (CAD format):
+
+```bash
+# Convert a single JSON file to DXF
+python svg_to_dxf.py outputs/json/drawing_vectors.json
+
+# Specify output file
+python svg_to_dxf.py outputs/json/drawing_vectors.json -o output.dxf
+
+# Convert all JSON files in a directory
+python svg_to_dxf.py --dir outputs/json
+
+# Without layer organization
+python svg_to_dxf.py input.json --no-layers
+
+# Specify output directory
+python svg_to_dxf.py --dir outputs/json --output-dir my_dxf_files
+
+# With uv
+uv run svg_to_dxf.py outputs/json/drawing_vectors.json
+
+# Show help
+python svg_to_dxf.py --help
+```
+
+### Command-Line Arguments
+
+**Vector Extraction Tools (svg_vector_extractor.py, png_vector_extractor.py):**
 - **files**: One or more file paths to process
 - **--dir**: Directory containing files (processes all matching files)
 - **--output**: Output directory for results (default: outputs)
 
+**DXF Conversion Tool (svg_to_dxf.py):**
+- **input**: JSON file with vector data from svg_vector_extractor.py
+- **-o, --output**: Output DXF file path (default: same name as input)
+- **--dir**: Process all JSON files in directory
+- **--no-layers**: Do not organize entities by type into separate layers
+- **--output-dir**: Output directory for DXF files (default: outputs/dxf)
+
 ## Output
 
-Both tools create output directories:
+The tools create various output directories:
 
+**Vector Extraction:**
 - `outputs/svg_analysis/` or `outputs/png_analysis/` - Comprehensive visualizations
 - `outputs/png_vectors/` - Clean vector visualizations on white background (PNG tool only)
 - `outputs/json/` - JSON exports of extracted vector data with coordinates
+
+**DXF Conversion:**
+- `outputs/dxf/` - DXF files ready for CAD applications (AutoCAD, LibreCAD, etc.)
 
 ## Features
 
@@ -125,6 +172,16 @@ Both tools create output directories:
 - **Lines**: Extracted using Hough Line Transform
 - **Curves**: Detected from contours with Bézier approximation
 - **Contours**: Full contour extraction with simplified vertices
+
+### DXF Conversion (CAD Export)
+- **Lines**: Direct line entity export
+- **Polylines**: Multi-segment connected lines (closed or open)
+- **Circles**: Perfect circle entities
+- **Ellipses**: True ellipse entities with major/minor axes
+- **Splines**: Cubic Bézier curves converted to splines (degree 3)
+- **Layer Organization**: Automatic grouping by entity type (LINES, CURVES, SHAPES, PATHS)
+- **Format**: AutoCAD R2010 DXF format (widely compatible)
+- **Supported Applications**: AutoCAD, LibreCAD, QCAD, FreeCAD, SolidWorks, etc.
 
 ### Output Format
 
@@ -210,6 +267,62 @@ Line 0:
   Start point: (120.00, 340.00)
   End point:   (450.00, 340.00)
   Length:      330.00 pixels
+```
+
+### DXF Conversion Output Example
+
+```
+==========================================================
+Processing: drawing_vectors.json
+==========================================================
+
+Loading vector data from JSON...
+
+Converting vectors to DXF...
+  Processing path 1/24...
+  Processing path 2/24...
+  ...
+
+==========================================================
+DXF CONVERSION STATISTICS
+==========================================================
+Lines:              156
+Polylines:          45
+Splines:            12
+Circles:            8
+Ellipses:           3
+Arcs:               2
+==========================================================
+Total entities:     226
+==========================================================
+
+✓ DXF file saved: outputs/dxf/drawing.dxf
+  Size: 45.23 KB
+```
+
+## Workflow Example
+
+Complete workflow from SVG to DXF:
+
+```bash
+# Step 1: Extract vectors from SVG file
+python svg_vector_extractor.py my_drawing.svg
+
+# Step 2: Convert extracted vectors to DXF
+python svg_to_dxf.py outputs/json/my_drawing_vectors.json
+
+# Step 3: Open the DXF file in your CAD application
+# The file will be at: outputs/dxf/my_drawing.dxf
+```
+
+Or process multiple files at once:
+
+```bash
+# Extract all SVG files in a directory
+python svg_vector_extractor.py --dir drawings/
+
+# Convert all JSON outputs to DXF
+python svg_to_dxf.py --dir outputs/json
 ```
 
 ## Format Comparison

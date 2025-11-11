@@ -4,3 +4,4 @@ Pillow>=9.0.0
 matplotlib>=3.5.0
 scipy>=1.7.0
 svg.path>=6.0
+ezdxf>=1.0.0
