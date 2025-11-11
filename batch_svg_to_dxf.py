@@ -54,7 +54,8 @@ def process_single_file_worker(svg_file, output_dir, temp_dir, keep_json):
 
         # Step 1: Extract vectors
         result['stage'] = 'extraction'
-        json_output = temp_dir / f"{svg_file.stem}_vectors.json"
+        # svg_vector_extractor.py saves to <output>/json/ subdirectory
+        json_output = temp_dir / 'json' / f"{svg_file.stem}_vectors.json"
 
         cmd = [
             sys.executable,

@@ -618,10 +618,12 @@ Examples:
 
             # Visualize
             print("\nCreating visualizations...")
-            visualize_svg(svg_file, paths, shapes, lines, curves)
+            svg_analysis_dir = Path(args.output) / 'svg_analysis'
+            visualize_svg(svg_file, paths, shapes, lines, curves, output_dir=svg_analysis_dir)
 
             # Export to JSON
-            export_to_json(svg_file, results, paths, shapes, lines, curves)
+            json_output_dir = Path(args.output) / 'json'
+            export_to_json(svg_file, results, paths, shapes, lines, curves, output_dir=json_output_dir)
 
             print(f"\n✓ Completed processing {svg_file.name}")
 
