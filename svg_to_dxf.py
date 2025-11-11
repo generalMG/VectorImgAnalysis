@@ -13,8 +13,59 @@ def load_vector_data(json_path):
         data = json.load(f)
     return data
 
+def get_svg_height(vector_data):
+    """Extract SVG height from metadata for coordinate transformation"""
+    svg_metadata = vector_data.get('svg_metadata', {})
+
+    # Try to get height from metadata
+    height_str = svg_metadata.get('height', 'not specified')
+    viewBox_str = svg_metadata.get('viewBox', 'not specified')
+
+    # Try parsing height attribute
+    if height_str != 'not specified':
+        try:
+            # Remove units like 'px', 'pt', etc.
+            height = float(''.join(c for c in str(height_str) if c.isdigit() or c == '.'))
+            return height
+        except:
+            pass
+
+    # Try parsing viewBox (format: "min-x min-y width height")
+    if viewBox_str != 'not specified':
+        try:
+            parts = str(viewBox_str).split()
+            if len(parts) == 4:
+                height = float(parts[3])
+                return height
+        except:
+            pass
+
+    # Default: try to determine from data bounds
+    print("  Warning: Could not determine SVG height from metadata, calculating from bounds...")
+    return None
+
+def flip_y(point, height):
+    """Flip Y coordinate for SVG to DXF conversion"""
+    if height is None:
+        return point
+    return (point[0], height - point[1])
+
+def flip_y_list(points, height):
+    """Flip Y coordinates for a list of points"""
+    if height is None:
+        return points
+    return [flip_y(p, height) for p in points]
+
 def create_dxf_from_vectors(vector_data, output_path, layer_by_type=True):
     """Convert vector data to DXF file"""
+
+    # Get SVG height for coordinate transformation
+    svg_height = get_svg_height(vector_data)
+    if svg_height:
+        print(f"  SVG height detected: {svg_height}")
+        print(f"  Applying Y-axis flip for CAD coordinate system...")
+    else:
+        print(f"  Warning: Could not determine SVG height, coordinates may be flipped")
 
     # Create a new DXF document
     doc = ezdxf.new('R2010')  # AutoCAD 2010 format
@@ -63,7 +114,7 @@ def create_dxf_from_vectors(vector_data, output_path, layer_by_type=True):
                 # Move operation - start new polyline
                 if polyline_points and len(polyline_points) > 1:
                     # Save previous polyline
-                    add_polyline(msp, polyline_points, layer)
+                    add_polyline(msp, polyline_points, layer, svg_height)
                     stats['polylines'] += 1
                     polyline_points = []
 
@@ -89,6 +140,12 @@ def create_dxf_from_vectors(vector_data, output_path, layer_by_type=True):
                 control2 = data.get('control2', (0, 0))
                 end = data.get('end', (0, 0))
 
+                # Flip Y coordinates
+                start = flip_y(start, svg_height)
+                control1 = flip_y(control1, svg_height)
+                control2 = flip_y(control2, svg_height)
+                end = flip_y(end, svg_height)
+
                 # Create spline through cubic Bezier
                 points = approximate_cubic_bezier(start, control1, control2, end)
 
@@ -105,11 +162,16 @@ def create_dxf_from_vectors(vector_data, output_path, layer_by_type=True):
                 control = data.get('control', (0, 0))
                 end = data.get('end', (0, 0))
 
+                # Flip Y coordinates
+                start = flip_y(start, svg_height)
+                control = flip_y(control, svg_height)
+                end = flip_y(end, svg_height)
+
                 # Approximate with polyline
                 points = approximate_quadratic_bezier(start, control, end)
 
-                # Add as polyline
-                add_polyline(msp, points, layer)
+                # Add as polyline (coordinates already flipped)
+                add_polyline(msp, points, layer, None)
                 stats['polylines'] += 1
 
                 current_point = end
@@ -122,7 +184,7 @@ def create_dxf_from_vectors(vector_data, output_path, layer_by_type=True):
 
                 # Simple arc approximation
                 points = [start, end]  # Simplified - could be improved
-                add_polyline(msp, points, layer)
+                add_polyline(msp, points, layer, svg_height)
                 stats['arcs'] += 1
 
                 current_point = end
@@ -131,13 +193,13 @@ def create_dxf_from_vectors(vector_data, output_path, layer_by_type=True):
                 # Close path
                 if polyline_points and len(polyline_points) > 1:
                     # Close the polyline
-                    add_polyline(msp, polyline_points, layer, closed=True)
+                    add_polyline(msp, polyline_points, layer, svg_height, closed=True)
                     stats['polylines'] += 1
                     polyline_points = []
 
         # Add remaining polyline if any
         if polyline_points and len(polyline_points) > 1:
-            add_polyline(msp, polyline_points, layer)
+            add_polyline(msp, polyline_points, layer, svg_height)
             stats['polylines'] += 1
 
     # Process shape elements
@@ -149,33 +211,33 @@ def create_dxf_from_vectors(vector_data, output_path, layer_by_type=True):
         if shape_type == 'line':
             start = shape.get('start', (0, 0))
             end = shape.get('end', (0, 0))
-            add_line(msp, start, end, layer)
+            add_line(msp, start, end, layer, svg_height)
             stats['lines'] += 1
 
         elif shape_type == 'rectangle':
             corners = shape.get('corners', [])
             if len(corners) == 4:
-                add_polyline(msp, corners, layer, closed=True)
+                add_polyline(msp, corners, layer, svg_height, closed=True)
                 stats['polylines'] += 1
 
         elif shape_type == 'circle':
             center = shape.get('center', (0, 0))
             radius = shape.get('radius', 0)
-            add_circle(msp, center, radius, layer)
+            add_circle(msp, center, radius, layer, svg_height)
             stats['circles'] += 1
 
         elif shape_type == 'ellipse':
             center = shape.get('center', (0, 0))
             rx = shape.get('radius_x', 0)
             ry = shape.get('radius_y', 0)
-            add_ellipse(msp, center, rx, ry, layer)
+            add_ellipse(msp, center, rx, ry, layer, svg_height)
             stats['ellipses'] += 1
 
         elif shape_type in ['polyline', 'polygon']:
             points = shape.get('points', [])
             closed = shape.get('closed', False)
             if points:
-                add_polyline(msp, points, layer, closed=closed)
+                add_polyline(msp, points, layer, svg_height, closed=closed)
                 stats['polylines'] += 1
 
     # Process extracted lines (from categorization)
@@ -184,7 +246,7 @@ def create_dxf_from_vectors(vector_data, output_path, layer_by_type=True):
     for line in lines:
         start = line.get('start', (0, 0))
         end = line.get('end', (0, 0))
-        add_line(msp, start, end, layer)
+        add_line(msp, start, end, layer, svg_height)
 
     # Process extracted curves (from categorization)
     curves = vector_data.get('curves', [])
@@ -196,14 +258,14 @@ def create_dxf_from_vectors(vector_data, output_path, layer_by_type=True):
         if curve_type == 'circle' and 'center' in curve_data:
             center = curve_data.get('center', (0, 0))
             radius = curve_data.get('radius', 0)
-            add_circle(msp, center, radius, layer)
+            add_circle(msp, center, radius, layer, svg_height)
             stats['circles'] += 1
 
         elif curve_type == 'ellipse' and 'center' in curve_data:
             center = curve_data.get('center', (0, 0))
             rx = curve_data.get('radius_x', 0)
             ry = curve_data.get('radius_y', 0)
-            add_ellipse(msp, center, rx, ry, layer)
+            add_ellipse(msp, center, rx, ry, layer, svg_height)
             stats['ellipses'] += 1
 
     # Save DXF file
@@ -211,18 +273,25 @@ def create_dxf_from_vectors(vector_data, output_path, layer_by_type=True):
 
     return stats
 
-def add_line(msp, start, end, layer):
+def add_line(msp, start, end, layer, height=None):
     """Add a line to the modelspace"""
+    # Flip Y coordinates
+    start = flip_y(start, height)
+    end = flip_y(end, height)
+
     msp.add_line(
         Vec3(start[0], start[1], 0),
         Vec3(end[0], end[1], 0),
         dxfattribs={'layer': layer}
     )
 
-def add_polyline(msp, points, layer, closed=False):
+def add_polyline(msp, points, layer, height=None, closed=False):
     """Add a polyline to the modelspace"""
     if len(points) < 2:
         return
+
+    # Flip Y coordinates
+    points = flip_y_list(points, height)
 
     points_3d = [Vec3(p[0], p[1], 0) for p in points]
     polyline = msp.add_lwpolyline(
@@ -232,10 +301,13 @@ def add_polyline(msp, points, layer, closed=False):
     if closed:
         polyline.close()
 
-def add_circle(msp, center, radius, layer):
+def add_circle(msp, center, radius, layer, height=None):
     """Add a circle to the modelspace"""
     if radius <= 0:
         return
+
+    # Flip Y coordinate
+    center = flip_y(center, height)
 
     msp.add_circle(
         Vec3(center[0], center[1], 0),
@@ -243,10 +315,13 @@ def add_circle(msp, center, radius, layer):
         dxfattribs={'layer': layer}
     )
 
-def add_ellipse(msp, center, rx, ry, layer):
+def add_ellipse(msp, center, rx, ry, layer, height=None):
     """Add an ellipse to the modelspace"""
     if rx <= 0 or ry <= 0:
         return
+
+    # Flip Y coordinate
+    center = flip_y(center, height)
 
     # Calculate major axis vector
     if rx >= ry:

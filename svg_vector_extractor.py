@@ -482,13 +482,18 @@ Line Sources:
 
     return output_file
 
-def export_to_json(svg_path, paths, shapes, lines, curves, output_dir='outputs/json'):
+def export_to_json(svg_path, results, paths, shapes, lines, curves, output_dir='outputs/json'):
     """Export vectors to JSON"""
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
 
     data = {
         'file': str(svg_path),
+        'svg_metadata': {
+            'viewBox': results.get('viewBox', 'not specified'),
+            'width': results.get('width', 'not specified'),
+            'height': results.get('height', 'not specified')
+        },
         'paths': paths,
         'shapes': shapes,
         'lines': lines,
@@ -616,7 +621,7 @@ Examples:
             visualize_svg(svg_file, paths, shapes, lines, curves)
 
             # Export to JSON
-            export_to_json(svg_file, paths, shapes, lines, curves)
+            export_to_json(svg_file, results, paths, shapes, lines, curves)
 
             print(f"\n✓ Completed processing {svg_file.name}")
 
