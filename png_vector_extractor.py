@@ -1,4 +1,5 @@
 import sys
+import argparse
 from pathlib import Path
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
@@ -391,21 +392,88 @@ def export_vectors_to_json(png_path, lines, curves, contours, output_dir='output
     return output_file
 
 def main():
-    png_files = list(Path('png_files').glob('*.png'))
+    parser = argparse.ArgumentParser(
+        description='Extract vector-like data (lines, curves, contours) from PNG images',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog='''
+Examples:
+  python png_vector_extractor.py image.png
+  python png_vector_extractor.py /path/to/image.png
+  python png_vector_extractor.py image1.png image2.png image3.png
+  python png_vector_extractor.py *.png
+  python png_vector_extractor.py --dir png_files
+        '''
+    )
+
+    parser.add_argument(
+        'files',
+        nargs='*',
+        help='PNG file path(s) to analyze. Can specify multiple files.'
+    )
+
+    parser.add_argument(
+        '--dir',
+        type=str,
+        help='Directory containing PNG files (will process all *.png files)'
+    )
+
+    parser.add_argument(
+        '--output',
+        type=str,
+        default='outputs',
+        help='Output directory for results (default: outputs)'
+    )
+
+    args = parser.parse_args()
+
+    # Collect PNG files to process
+    png_files = []
+
+    if args.dir:
+        # Process directory
+        dir_path = Path(args.dir)
+        if not dir_path.exists():
+            print(f"✗ Error: Directory '{args.dir}' does not exist")
+            sys.exit(1)
+        if not dir_path.is_dir():
+            print(f"✗ Error: '{args.dir}' is not a directory")
+            sys.exit(1)
+        png_files = list(dir_path.glob('*.png'))
+        if not png_files:
+            print(f"✗ No PNG files found in directory '{args.dir}'")
+            sys.exit(1)
+    elif args.files:
+        # Process individual files
+        for file_path in args.files:
+            path = Path(file_path)
+            if not path.exists():
+                print(f"✗ Warning: File '{file_path}' does not exist, skipping...")
+                continue
+            if not path.is_file():
+                print(f"✗ Warning: '{file_path}' is not a file, skipping...")
+                continue
+            if path.suffix.lower() != '.png':
+                print(f"✗ Warning: '{file_path}' is not a PNG file, skipping...")
+                continue
+            png_files.append(path)
+    else:
+        # No arguments provided, show help
+        print("✗ Error: Please specify PNG file(s) or use --dir option")
+        print()
+        parser.print_help()
+        sys.exit(1)
 
     if not png_files:
-        print("No PNG files found in the 'png_files' directory.")
-        print("Creating example directory...")
-        Path('png_files').mkdir(exist_ok=True)
-        print("Please add PNG files to the 'png_files' directory and run again.")
-        return
+        print("✗ No valid PNG files to process")
+        sys.exit(1)
 
-    print(f"Found {len(png_files)} PNG file(s)\n")
+    print(f"Found {len(png_files)} PNG file(s) to process\n")
 
     for png_file in png_files:
         try:
             print(f"\n{'='*60}")
             print(f"Processing: {png_file.name}")
+            print(f"  Path: {png_file.absolute()}")
             print(f"{'='*60}")
 
             # Analyze PNG

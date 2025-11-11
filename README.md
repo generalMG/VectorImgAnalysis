@@ -18,13 +18,30 @@ pip install -r requirements.txt
 
 ## Usage
 
-1. Create a `png_files` directory (or it will be created automatically)
-2. Place your PNG files in the `png_files` directory
-3. Run the extractor:
+### Basic Usage
 
 ```bash
-python png_vector_extractor.py
+# Process a single PNG file
+python png_vector_extractor.py /path/to/your/image.png
+
+# Process multiple PNG files
+python png_vector_extractor.py image1.png image2.png image3.png
+
+# Process all PNG files in a directory
+python png_vector_extractor.py --dir /path/to/directory
+
+# Using wildcards (in bash/zsh)
+python png_vector_extractor.py *.png
+
+# Show help
+python png_vector_extractor.py --help
 ```
+
+### Command-Line Arguments
+
+- **files**: One or more PNG file paths to process
+- **--dir**: Directory containing PNG files (processes all *.png files)
+- **--output**: Output directory for results (default: outputs)
 
 ## Output
 
