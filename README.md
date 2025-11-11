@@ -12,8 +12,23 @@ A Python tool to analyze PNG images and extract vector-like data (lines, curves,
 
 ## Installation
 
+### Using pip
+
 ```bash
 pip install -r requirements.txt
+```
+
+### Using uv (faster alternative)
+
+```bash
+# Install uv if you haven't already
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Install dependencies
+uv pip install -r requirements.txt
+
+# Or use uv to run the script directly (creates venv automatically)
+uv run png_vector_extractor.py /path/to/image.png
 ```
 
 ## Usage
